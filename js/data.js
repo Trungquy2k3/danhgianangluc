@@ -29,12 +29,7 @@ const APP_CONFIG = {
 
   allowComments: true,
 
-  adminCredentials: {
-    username: 'trungquy',
-    password: 'trung quy2025'
-  },
-
-  scoreScale: [
+scoreScale: [
     { value: 1, label: 'Rất yếu', description: 'Chưa đáp ứng / chưa thực hiện được' },
     { value: 2, label: 'Yếu', description: 'Cần cải thiện nhiều' },
     { value: 3, label: 'Đạt', description: 'Đạt yêu cầu cơ bản' },
@@ -176,6 +171,13 @@ const employees = [
   ['NV098', ' Trương Thị Cúc ', 'Công nhân', '-', 'Công nhân', 'Công nhân', '-'],
   ['NV099', ' Rơ Châm Phĩu ', 'Công nhân', '-', 'Công nhân', 'Công nhân', '-'],
   ['NV100', ' Phạm Thu Hường ', 'Thủ Kho', '-', 'Công nhân', 'Thủ kho', '-'],
+  ['NV101', ' Đào Bá Quyền ', 'Công nhân', '-', 'Công nhân', 'Công nhân', '-'],
+  ['NV102', ' Nguyễn Công Việt ', 'Công nhân', '-', 'Công nhân', 'Công nhân', '-'],
+  ['NV103', ' Lê Văn Nam ', 'Kỹ thuật', '-', 'Kỹ Thuật', 'Kỹ sư điện', '-'],
+  ['NV104', ' Ngô Văn Diễn ', 'Kỹ thuật', '-', 'Kỹ Thuật', 'Chỉ huy công trường', '-'],
+  ['NV105', ' Trương Thị Cúc ', 'Công nhân', '-', 'Công nhân', 'Công nhân', '-'],
+  ['NV106', ' Trương Thị Cúc ', 'Công nhân', '-', 'Công nhân', 'Công nhân', '-'],
+  ['NV107', ' Trương Thị Cúc ', 'Công nhân', '-', 'Công nhân', 'Công nhân', '-']
 ].map(([id,name,department,team,position,group,joinDate]) => ({
   id, name, department, team, position, group, joinDate,
   avatar: `images/employees/${id}.jpg`,

@@ -1,0 +1,37 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== Quiz Master =====
+    match /submissions/{id} {
+      allow create: if request.resource.data.score is int
+                    && request.resource.data.score >= 0
+                    && request.resource.data.score <= 100;
+      allow read, delete: if request.auth != null;
+      allow update: if false;
+    }
+
+    // ===== Employee Evaluation =====
+    // Cấu hình (nhân sự, tiêu chí, kỳ, cài đặt): ai cũng đọc, chỉ admin ghi
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    // Đánh giá chéo: ai cũng gửi mới được, không ai sửa, chỉ admin xóa
+    match /evaluations/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.type == 'cross'
+                    && request.resource.data.keys().hasAll(['evaluatorId', 'targetId', 'periodId', 'scores']);
+      allow update: if false;
+      allow delete: if request.auth != null;
+    }
+    // Tự đánh giá
+    match /selfEvaluations/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.type == 'self'
+                    && request.resource.data.keys().hasAll(['evaluatorId', 'targetId', 'periodId', 'scores']);
+      allow update: if false;
+      allow delete: if request.auth != null;
+    }
+  }
+}

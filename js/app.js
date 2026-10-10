@@ -1,6 +1,6 @@
 /* =========================================================
    EMPLOYEE EVALUATION SYSTEM - FRONTEND SPA
-   Mọi chức năng chạy phía trình duyệt + localStorage.
+   Giao diện chạy trên trình duyệt, dữ liệu lưu trên Firebase Firestore.
    Đây KHÔNG phải cơ chế bảo mật production.
    ========================================================= */
 
@@ -189,7 +189,7 @@ function employeeLoginTemplate(){
   return `<div class="search-wrap"><i class="fa-solid fa-search"></i><input id="employeeSearch" autocomplete="off" placeholder="Tìm tên nhân viên, mã, bộ phận, nhóm..."></div><div id="employeePickList" class="employee-pick-list"></div><div id="pinPanel" class="pin-panel hidden"></div>`;
 }
 function adminLoginTemplate(){
-  return `<form id="adminLoginForm" class="mt-4" onsubmit="return doAdminLogin(event)"><div class="field mb-3"><label>Tài khoản</label><input id="adminUsername"  required></div><div class="field mb-3"><label>Mật khẩu</label><input id="adminPassword" type="password"  required></div><button class="btn btn-primary w-100 py-3">Đăng nhập quản trị</button><div class="demo-login">Demo frontend: <strong>admin / admin123</strong>. Không dùng thông tin này cho production.</div></form>`;
+  return `<form id="adminLoginForm" class="mt-4" onsubmit="return doAdminLogin(event)"><div class="field mb-3"><label>Email quản trị</label><input id="adminUsername"  required></div><div class="field mb-3"><label>Mật khẩu</label><input id="adminPassword" type="password"  required></div><button class="btn btn-primary w-100 py-3">Đăng nhập quản trị</button></form>`;
 }
 function renderLoginEmployeeList(){
   const box=$('#employeePickList'); if(!box) return;
@@ -213,8 +213,8 @@ function employeeLogin(){
 function doAdminLogin(event){
   event.preventDefault();
   const u=$('#adminUsername').value.trim(), p=$('#adminPassword').value;
-  if(u===APP_CONFIG.adminCredentials.username && p===APP_CONFIG.adminCredentials.password){session={role:'admin'};saveSession(session);currentRoute='admin-dashboard';render();}
-  else toast('error','Sai tài khoản hoặc mật khẩu Admin.');
+  adminSignIn(u,p).then(()=>{session={role:'admin'};saveSession(session);currentRoute='admin-dashboard';render();})
+    .catch(()=>toast('error','Sai email hoặc mật khẩu Admin.'));
   return false;
 }
 
@@ -309,8 +309,9 @@ async function submitSelf(){
   if(totalWeight()!==100) return toast('warning',`Tổng trọng số hiện là ${totalWeight()}%, cần đúng 100%.`);
   if(!await confirmAction('Nộp tự đánh giá?','Sau khi gửi, bài đánh giá sẽ bị khóa trong kỳ này.','Nộp đánh giá')) return;
   const scores={}; activeQuestions().forEach(c=>{const vals=c.questions.map(q=>answers[q.id]);scores[c.id]=+avg(vals).toFixed(2);});
-  DB.selfEvaluations.push({id:crypto.randomUUID(),periodId:activePeriod().id,targetId:me.id,evaluatorId:me.id,type:'self',date:new Date().toISOString(),answers,scores,note:DB.settings.allowComments?$('#evaluationNote').value.trim():''});
-  persist();toast('success','Đánh giá đã được gửi thành công.');go('results');
+  const rec={id:'',periodId:activePeriod().id,targetId:me.id,evaluatorId:me.id,type:'self',date:new Date().toISOString(),answers,scores,note:DB.settings.allowComments?$('#evaluationNote').value.trim():''};
+  if(!await saveRecord('selfEvaluations',rec)) return;
+  toast('success','Đánh giá đã được gửi thành công.');go('results');
 }
 
 function renderCrossEvaluation(el){
@@ -336,8 +337,9 @@ async function submitCross(){
   const totalQuestions=activeQuestions().reduce((s,c)=>s+c.questions.length,0); if(Object.keys(answers).length<totalQuestions)return toast('warning','Bạn chưa hoàn thành tất cả câu hỏi.'); if(totalWeight()!==100)return toast('warning',`Tổng trọng số ${totalWeight()}%, cần đúng 100%.`);
   if(!await confirmAction('Gửi đánh giá chéo?','Sau khi gửi sẽ không thể đánh giá lại người này trong kỳ hiện tại.','Gửi đánh giá')) return;
   const scores={}; activeQuestions().forEach(c=>scores[c.id]=+avg(c.questions.map(q=>answers[q.id])).toFixed(2));
-  DB.evaluations.push({id:crypto.randomUUID(),periodId:activePeriod().id,evaluatorId:me.id,targetId:target.id,type:'cross',date:new Date().toISOString(),answers,scores,note:DB.settings.allowComments?$('#evaluationNote').value.trim():''});
-  persist(); toast('success','Đánh giá đã được gửi thành công.'); render();
+  const rec={id:'',periodId:activePeriod().id,evaluatorId:me.id,targetId:target.id,type:'cross',date:new Date().toISOString(),answers,scores,note:DB.settings.allowComments?$('#evaluationNote').value.trim():''};
+  if(!await saveRecord('evaluations',rec)) return;
+  toast('success','Đánh giá đã được gửi thành công.'); render();
 }
 function renderResults(el){
   if(!DB.settings.allowUserResultView){ el.innerHTML='<div class="card"><div class="empty"><i class="fa-solid fa-eye-slash fa-2x mb-3"></i><div>Admin đang tắt quyền xem kết quả đối với người dùng.</div></div></div>'; return; }
@@ -386,10 +388,10 @@ function renderAdminEmployees(){
   const arr=DB.employees.filter(e=>(!q||[e.name,e.id,e.department,e.team,e.position,e.group].some(v=>String(v).toLowerCase().includes(q)))&&(!g||e.group===g)&&(!s||e.status===s)).sort((a,b)=>String(a[sort]||'').localeCompare(String(b[sort]||''),'vi'));
   box.innerHTML=`<div class="table-wrap"><table class="table"><thead><tr><th>#</th><th>Ảnh</th><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Tổ</th><th>Nhóm</th><th>Chức vụ</th><th>Trạng thái</th><th>Thao tác</th></tr></thead><tbody>${arr.map((e,i)=>`<tr><td>${i+1}</td><td>${avatarHTML(e)}</td><td><strong>${esc(e.id)}</strong></td><td>${esc(e.name)}</td><td>${esc(e.department)}</td><td>${esc(e.team)}</td><td><span class="badge badge-blue">${esc(e.group)}</span></td><td>${esc(e.position)}</td><td><span class="badge ${e.status==='active'?'badge-green':'badge-red'}">${e.status==='active'?'Hoạt động':'Khóa'}</span></td><td><div class="d-flex gap-1"><button class="btn btn-soft btn-sm" data-action="edit-employee" data-id="${e.id}"><i class="fa-solid fa-pen"></i></button><button class="btn btn-soft btn-sm" data-action="toggle-employee-status" data-id="${e.id}"><i class="fa-solid ${e.status==='active'?'fa-lock':'fa-unlock'}"></i></button><button class="btn btn-danger btn-sm" data-action="delete-employee" data-id="${e.id}"><i class="fa-solid fa-trash"></i></button></div></td></tr>`).join('')}</tbody></table></div>`;
 }
-function employeeForm(emp={}){return `<div class="grid grid-2"><div class="field"><label>Họ tên</label><input id="fName" value="${esc(emp.name||'')}" required></div><div class="field"><label>Mã nhân viên</label><input id="fId" value="${esc(emp.id||'')}" ${emp.id?'readonly':''} required></div><div class="field"><label>Bộ phận</label><input id="fDept" value="${esc(emp.department||'')}" required></div><div class="field"><label>Tổ</label><input id="fTeam" value="${esc(emp.team||'')}" required></div><div class="field"><label>Chức vụ</label><input id="fPosition" value="${esc(emp.position||'')}" required></div><div class="field"><label>Nhóm</label><select id="fGroup"><option ${emp.group==='Công nhân'?'selected':''}>Công nhân</option><option ${emp.group==='Kỹ thuật'?'selected':''}>Kỹ thuật</option><option ${emp.group==='Khác'?'selected':''}>Khác</option></select></div><div class="field"><label>Ngày vào làm</label><input id="fJoin" type="date" value="${esc(emp.joinDate||'')}"></div><div class="field"><label>PIN</label><input id="fPin" value="${esc(emp.pin||'1234')}" maxlength="8"></div><div class="field"><label>Trạng thái</label><select id="fStatus"><option value="active" ${(!emp.status||emp.status==='active')?'selected':''}>Hoạt động</option><option value="locked" ${emp.status==='locked'?'selected':''}>Đã khóa</option></select></div><div class="field"><label>Ảnh nhân viên</label><input id="employeeImageInput" type="file" accept="image/*"><small class="muted">Ảnh mới được lưu Base64 vào localStorage.</small></div></div><div class="field mt-3"><label>Ảnh hiện tại</label><div id="employeePreview" style="min-height:95px">${emp.id?avatarHTML(emp,'avatar profile-avatar'):`<div class="muted">Chưa có ảnh</div>`}</div></div>`}
+function employeeForm(emp={}){return `<div class="grid grid-2"><div class="field"><label>Họ tên</label><input id="fName" value="${esc(emp.name||'')}" required></div><div class="field"><label>Mã nhân viên</label><input id="fId" value="${esc(emp.id||'')}" ${emp.id?'readonly':''} required></div><div class="field"><label>Bộ phận</label><input id="fDept" value="${esc(emp.department||'')}" required></div><div class="field"><label>Tổ</label><input id="fTeam" value="${esc(emp.team||'')}" required></div><div class="field"><label>Chức vụ</label><input id="fPosition" value="${esc(emp.position||'')}" required></div><div class="field"><label>Nhóm</label><select id="fGroup"><option ${emp.group==='Công nhân'?'selected':''}>Công nhân</option><option ${emp.group==='Kỹ thuật'?'selected':''}>Kỹ thuật</option><option ${emp.group==='Khác'?'selected':''}>Khác</option></select></div><div class="field"><label>Ngày vào làm</label><input id="fJoin" type="date" value="${esc(emp.joinDate||'')}"></div><div class="field"><label>PIN</label><input id="fPin" value="${esc(emp.pin||'1234')}" maxlength="8"></div><div class="field"><label>Trạng thái</label><select id="fStatus"><option value="active" ${(!emp.status||emp.status==='active')?'selected':''}>Hoạt động</option><option value="locked" ${emp.status==='locked'?'selected':''}>Đã khóa</option></select></div><div class="field"><label>Ảnh nhân viên</label><input id="employeeImageInput" type="file" accept="image/*"><small class="muted">Ảnh mới được thu nhỏ và lưu cùng dữ liệu trên Firebase.</small></div></div><div class="field mt-3"><label>Ảnh hiện tại</label><div id="employeePreview" style="min-height:95px">${emp.id?avatarHTML(emp,'avatar profile-avatar'):`<div class="muted">Chưa có ảnh</div>`}</div></div>`}
 function openEmployeeModal(id){const emp=id?DB.employees.find(e=>e.id===id):null; showModal(`<div class="modal-head"><h3 class="card-title">${id?'Sửa nhân sự':'Thêm nhân sự'}</h3><button class="icon-btn" data-action="close-modal"><i class="fa-solid fa-xmark"></i></button></div><div class="modal-body">${employeeForm(emp||{})}</div><div class="modal-foot"><button class="btn" data-action="close-modal">Hủy</button><button class="btn btn-primary" data-action="save-employee" data-id="${id||''}">Lưu</button></div>`);}
 let pendingEmployeeImage='';
-function previewEmployeeImage(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{pendingEmployeeImage=reader.result;$('#employeePreview').innerHTML=`<img src="${reader.result}" style="width:95px;height:95px;object-fit:cover;border-radius:22px">`;};reader.readAsDataURL(file)}
+function previewEmployeeImage(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{const img=new Image();img.onload=()=>{const S=120,c=document.createElement('canvas');c.width=c.height=S;const x=c.getContext('2d');const m=Math.min(img.width,img.height),sx=(img.width-m)/2,sy=(img.height-m)/2;x.drawImage(img,sx,sy,m,m,0,0,S,S);pendingEmployeeImage=c.toDataURL('image/jpeg',0.7);$('#employeePreview').innerHTML=`<img src="${pendingEmployeeImage}" style="width:95px;height:95px;object-fit:cover;border-radius:22px">`;};img.src=reader.result;};reader.readAsDataURL(file)}
 function saveEmployee(id){
   const data={id:$('#fId').value.trim(),name:$('#fName').value.trim(),department:$('#fDept').value.trim(),team:$('#fTeam').value.trim(),position:$('#fPosition').value.trim(),group:$('#fGroup').value,joinDate:$('#fJoin').value,pin:$('#fPin').value.trim()||'1234',status:$('#fStatus').value,avatar:pendingEmployeeImage||''};
   if(!data.id||!data.name||!data.department||!data.team||!data.position)return toast('warning','Vui lòng nhập đủ thông tin bắt buộc.');
@@ -446,10 +448,11 @@ function renderAdminReports(){const box=$('#reportsRoot');if(!box)return;const q
   const periodId=period||activePeriod().id;
   box.innerHTML=`<div class="card"><div class="card-head"><div><h3 class="section-title">BÁO CÁO ĐÁNH GIÁ NĂNG LỰC</h3><div class="muted" style="font-size:12px">Lọc theo kỳ, bộ phận, nhóm, nhân viên và tiêu chí.</div></div><div class="d-flex gap-2"><button class="btn btn-soft" data-action="export-results-xlsx"><i class="fa-solid fa-file-excel me-1"></i>Xuất Excel</button><button class="btn btn-soft" data-action="print-report"><i class="fa-solid fa-print me-1"></i>In</button><button class="btn btn-primary" data-action="export-report-pdf"><i class="fa-solid fa-file-pdf me-1"></i>Xuất PDF</button></div></div><div class="toolbar mb-3"><select id="reportPeriodFilter" class="form-select" style="max-width:220px"><option value="">Tất cả kỳ</option>${DB.periods.map(p=>`<option value="${p.id}" ${period===p.id?'selected':''}>${esc(p.name)}</option>`).join('')}</select><select id="reportDeptFilter" class="form-select" style="max-width:180px"><option value="">Tất cả bộ phận</option>${unique(DB.employees.map(x=>x.department)).map(v=>`<option ${dept===v?'selected':''}>${esc(v)}</option>`).join('')}</select><select id="reportGroupFilter" class="form-select" style="max-width:150px"><option value="">Tất cả nhóm</option><option ${group==='Công nhân'?'selected':''}>Công nhân</option><option ${group==='Kỹ thuật'?'selected':''}>Kỹ thuật</option><option ${group==='Khác'?'selected':''}>Khác</option></select><select id="reportCriteriaFilter" class="form-select" style="max-width:220px"><option value="">Tất cả tiêu chí</option>${getCriteria().map(c=>`<option value="${c.id}" ${crit===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select><input id="reportEmployeeSearch" class="filter-input field input" placeholder="Tìm nhân viên..."></div><div class="table-wrap"><table class="table"><thead><tr><th>Nhân sự</th><th>Bộ phận</th><th>Nhóm</th><th>Điểm tổng</th>${criteria.map(c=>`<th>${esc(c.name)}</th>`).join('')}</tr></thead><tbody>${rows.map(e=>{const selfP=recordsForPeriod(e.id,'self',periodId)[0];const crossP=recordsForPeriod(e.id,'cross',periodId);const cross=criteriaScoreMap(crossP);const selfScore=selfP?weightedScore(selfP.scores):0;const crossScore=crossP.length?weightedScore(cross):0;let score=0;if(selfP&&crossP.length){const sc=APP_CONFIG.scoreComposition,total=Number(sc.self)+Number(sc.cross)||100;score=+((selfScore*(Number(sc.self)||0)+crossScore*(Number(sc.cross)||0))/total).toFixed(1)}else score=+(selfScore||crossScore||0).toFixed(1);return `<tr><td>${esc(e.name)}<div class="muted" style="font-size:10px">${esc(e.id)}</div></td><td>${esc(e.department)}</td><td>${esc(e.group)}</td><td><strong>${score?score.toFixed(1):'—'}</strong></td>${criteria.map(c=>`<td>${cross[c.id]?Number(cross[c.id]).toFixed(2):'—'}</td>`).join('')}</tr>`}).join('')}</tbody></table></div></div>`;
 }
-function renderAdminSettings(el){const s=DB.settings;el.innerHTML=`<div class="grid grid-2"><div class="card"><div class="card-head"><h3 class="card-title">Cấu hình hệ thống</h3></div><div class="field mb-3"><label>Người điều hành dữ liệu</label><input id="setCompany" value="${esc(s.companyName)}"></div><div class="d-flex justify-content-between align-items-center py-2"><div><strong style="font-size:13px">Cho người dùng xem kết quả</strong><div class="muted" style="font-size:11px">true → hiển thị trang kết quả người dùng.</div></div><input id="setResult" class="toggle" type="checkbox" ${s.allowUserResultView?'checked':''}></div><div class="d-flex justify-content-between align-items-center py-2"><div><strong style="font-size:13px">Hiển thị tên người đánh giá</strong><div class="muted" style="font-size:11px">false → người nhận chỉ thấy “Đánh giá từ đồng nghiệp”.</div></div><input id="setEvaluator" class="toggle" type="checkbox" ${s.showEvaluatorName?'checked':''}></div><div class="d-flex justify-content-between align-items-center py-2"><div><strong style="font-size:13px">Cho phép nhận xét</strong><div class="muted" style="font-size:11px">Bật/tắt ô ghi chú trong bài đánh giá.</div></div><input id="setComments" class="toggle" type="checkbox" ${s.allowComments?'checked':''}></div><button class="btn btn-primary mt-3" data-action="save-settings">Lưu cài đặt</button></div><div class="card"><div class="card-head"><h3 class="card-title">Backup / Restore</h3></div><p class="muted" style="font-size:12px">Toàn bộ nhân sự, tiêu chí, câu hỏi, kỳ đánh giá, quyền và kết quả được lưu ở localStorage.</p><div class="d-grid gap-2"><button class="btn" data-action="export-data"><i class="fa-solid fa-download me-1"></i>EXPORT DATA JSON</button><label class="btn mb-0"><i class="fa-solid fa-upload me-1"></i>IMPORT DATA JSON<input id="importDataInput" type="file" accept="application/json" class="hidden"></label><button class="btn btn-danger" data-action="reset-data"><i class="fa-solid fa-rotate-left me-1"></i>RESET DỮ LIỆU DEMO</button></div><div class="demo-login mt-3"><strong>Lưu ý bảo mật frontend:</strong> localStorage + JavaScript không đủ an toàn cho hệ thống doanh nghiệp thực tế; PIN/admin password trong phiên bản này chỉ phục vụ demo.</div></div></div>`}
+function renderAdminSettings(el){const s=DB.settings;el.innerHTML=`<div class="grid grid-2"><div class="card"><div class="card-head"><h3 class="card-title">Cấu hình hệ thống</h3></div><div class="field mb-3"><label>Người điều hành dữ liệu</label><input id="setCompany" value="${esc(s.companyName)}"></div><div class="d-flex justify-content-between align-items-center py-2"><div><strong style="font-size:13px">Cho người dùng xem kết quả</strong><div class="muted" style="font-size:11px">true → hiển thị trang kết quả người dùng.</div></div><input id="setResult" class="toggle" type="checkbox" ${s.allowUserResultView?'checked':''}></div><div class="d-flex justify-content-between align-items-center py-2"><div><strong style="font-size:13px">Hiển thị tên người đánh giá</strong><div class="muted" style="font-size:11px">false → người nhận chỉ thấy “Đánh giá từ đồng nghiệp”.</div></div><input id="setEvaluator" class="toggle" type="checkbox" ${s.showEvaluatorName?'checked':''}></div><div class="d-flex justify-content-between align-items-center py-2"><div><strong style="font-size:13px">Cho phép nhận xét</strong><div class="muted" style="font-size:11px">Bật/tắt ô ghi chú trong bài đánh giá.</div></div><input id="setComments" class="toggle" type="checkbox" ${s.allowComments?'checked':''}></div><button class="btn btn-primary mt-3" data-action="save-settings">Lưu cài đặt</button></div><div class="card"><div class="card-head"><h3 class="card-title">Backup / Restore</h3></div><p class="muted" style="font-size:12px">Toàn bộ nhân sự, tiêu chí, câu hỏi, kỳ đánh giá, quyền và kết quả được lưu trên Firebase Firestore (dùng chung cho mọi máy).</p><div class="d-grid gap-2"><button class="btn" data-action="export-data"><i class="fa-solid fa-download me-1"></i>EXPORT DATA JSON</button><label class="btn mb-0"><i class="fa-solid fa-upload me-1"></i>IMPORT DATA JSON<input id="importDataInput" type="file" accept="application/json" class="hidden"></label><button class="btn btn-danger" data-action="reset-data"><i class="fa-solid fa-rotate-left me-1"></i>RESET CẤU HÌNH VỀ data.js</button><button class="btn btn-danger" data-action="clear-evaluations"><i class="fa-solid fa-trash me-1"></i>XÓA TOÀN BỘ KẾT QUẢ ĐÁNH GIÁ</button></div><div class="demo-login mt-3"><strong>Lưu ý:</strong> mã PIN nhân viên kiểm tra phía trình duyệt, chưa phải bảo mật cấp doanh nghiệp. Đăng nhập Admin dùng Firebase Authentication.</div></div></div>`}
 function saveSettings(){DB.settings.companyName=$('#setCompany').value.trim()||APP_CONFIG.companyName;DB.settings.allowUserResultView=$('#setResult').checked;DB.settings.showEvaluatorName=$('#setEvaluator').checked;DB.settings.allowComments=$('#setComments').checked;persist();toast('success','Đã lưu cài đặt.');render();}
-async function doImport(file){if(!file)return; if(!await confirmAction('Import dữ liệu?','Dữ liệu hiện tại sẽ được thay thế bởi file JSON.','Import'))return;try{DB=await importDataFile(file);closeModal();toast('success','Import dữ liệu thành công.');render();}catch(e){toast('error','File JSON không hợp lệ.');}}
-async function resetAll(){if(!await confirmAction('Reset dữ liệu?','Toàn bộ thay đổi localStorage sẽ trở về dữ liệu demo ban đầu.','Reset'))return;DB=resetData();toast('success','Đã reset dữ liệu demo.');render();}
+async function doImport(file){if(!file)return; if(!await confirmAction('Import dữ liệu?','Dữ liệu hiện tại sẽ được thay thế bởi file JSON.','Import'))return;try{toast('info','Đang import, vui lòng chờ...');DB=await importDataFile(file);closeModal();toast('success','Import dữ liệu thành công.');render();}catch(e){console.error(e);toast('error','Import thất bại: '+(e.message||'File JSON không hợp lệ.'));}}
+async function resetAll(){if(!await confirmAction('Reset cấu hình?','Nhân sự, tiêu chí, kỳ đánh giá và cài đặt sẽ trở về dữ liệu gốc trong data.js. Các bài đánh giá đã nộp được giữ nguyên.','Reset'))return;try{DB=await resetData();toast('success','Đã reset cấu hình về dữ liệu gốc.');render();}catch(e){toast('error','Reset thất bại: '+e.message);}}
+async function clearEvaluationsAction(){if(!await confirmAction('Xóa TOÀN BỘ kết quả đánh giá?','Xóa vĩnh viễn mọi bài tự đánh giá và đánh giá chéo trên máy chủ. Không thể khôi phục (hãy Export JSON trước).','Xóa hết'))return;try{await clearAllEvaluations();toast('success','Đã xóa toàn bộ kết quả đánh giá.');render();}catch(e){toast('error','Xóa thất bại: '+e.message);}}
 
 /* ==============================
    EXPORT
@@ -484,11 +487,11 @@ function drawAdminCriteriaChart(canvasId){const c=document.getElementById(canvas
    ============================== */
 function handleAction(action,data){
   switch(action){
-    case 'toggle-theme':DB.settings.theme=DB.settings.theme==='dark'?'light':'dark';persist();render();break;
+    case 'toggle-theme':DB.settings.theme=DB.settings.theme==='dark'?'light':'dark';localStorage.setItem('ee_theme',DB.settings.theme);render();break;
     case 'toggle-login-mode':loginMode=loginMode==='employee'?'admin':'employee';renderLogin();break;
     case 'select-login-employee':selectLoginEmployee(data.id);break;
     case 'employee-login':employeeLogin();break;
-    case 'logout':clearSession();session=null;selectedEmployeeId=null;currentRoute='login';render();break;
+    case 'logout':adminSignOut();clearSession();session=null;selectedEmployeeId=null;currentRoute='login';render();break;
     case 'toggle-sidebar':$('#sidebar')?.classList.toggle('open');break;
     case 'submit-self-evaluation':submitSelf();break;
     case 'select-cross-target':selectCrossTarget(data.id);break;
@@ -519,6 +522,7 @@ function handleAction(action,data){
     case 'save-settings':saveSettings();break;
     case 'export-data':exportDataFile(DB);toast('success','Đã xuất backup JSON.');break;
     case 'reset-data':resetAll();break;
+    case 'clear-evaluations':clearEvaluationsAction();break;
     case 'close-modal':closeModal();break;
   }
 }
@@ -526,4 +530,20 @@ function handleAction(action,data){
 // Keyboard shortcuts / initial route
 window.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();if(e.key==='Enter'&&document.activeElement?.id==='employeePin')employeeLogin()});
 window.addEventListener('hashchange',()=>{if(session){const h=location.hash.replace('#','');currentRoute=h|| (session.role==='admin'?'admin-dashboard':'dashboard');render();}});
-(function init(){ const hash=location.hash.replace('#','');if(hash && session)currentRoute=hash; else currentRoute=session?.role==='admin'?'admin-dashboard':'dashboard';render(); })();
+(async function init(){
+  const app=document.getElementById('app');
+  app.innerHTML='<div style="padding:60px 20px;text-align:center;font-family:sans-serif;color:#475569">Đang tải dữ liệu...</div>';
+  try{
+    DB=await initRemoteData();
+    const user=await waitForAuth();
+    if(session?.role==='admin' && !user){session=null;clearSession();}
+    startRealtime();
+  }catch(e){
+    console.error(e);
+    app.innerHTML='<div style="padding:60px 20px;text-align:center;font-family:sans-serif;color:#b91c1c"><h3>Không kết nối được máy chủ dữ liệu</h3><p>'+esc(e.message||'')+'</p><button onclick="location.reload()" style="padding:10px 20px">Thử lại</button></div>';
+    return;
+  }
+  const hash=location.hash.replace('#','');
+  if(hash && session)currentRoute=hash; else currentRoute=session?.role==='admin'?'admin-dashboard':'dashboard';
+  render();
+})();
